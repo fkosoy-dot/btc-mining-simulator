@@ -459,25 +459,31 @@ function calc(p){
     77527,86830,83357,92526,96227,124133,135305,151542,153058,220403,257871
   ]; // M1..M19
 
-  // ── POST-HALVING PATTERN: normalised multipliers vs price at halving ─────────
-  // Average of 2016 and 2020 cycles, months 1..17 post-halving
-  // 2016: halving Jun'16 at ~$650; peak ~$20k Dec'17 (+18M); M36 ~$3,500
-  // 2020: halving May'20 at ~$8,600; peak ~$69k Nov'21 (+18M); M36 ~$47k
-  // Multipliers normalised so M0=1.0, scaled to land on p.b3 at M36
-  const RAW_POST=[
-    1.00,1.02,1.05,1.12,1.22,1.38,1.60,1.88,
-    2.20,2.55,2.85,3.10,3.25,3.30,3.20,3.00,2.70
-  ]; // 17 months post-halving (M20..M36)
-  // Scale so that RAW_POST[16] maps to p.b3
-  const halvingPrice=PRE_HV_PRICES[18]; // $257,871 = price at halving month M19
-  const rawEnd=RAW_POST[RAW_POST.length-1];
-  const scale=p.b3/(halvingPrice*rawEnd);
-  const POST_HV_PRICES=RAW_POST.map(r=>Math.round(halvingPrice*r*scale));
+  // ── POST-HALVING CURVE: anchored to halvingPrice, peak at M33, lands on p.b3 ──
+  // Based on 2020 cycle pattern (most comparable to current cycle size):
+  //   - Price continues growing from halvingPrice without interruption
+  //   - Peak ~14 months post-halving (M33) at PEAK_MULT × halvingPrice
+  //   - Then exponential correction to p.b3 at M36
+  //   - PEAK_MULT = 2.0x (conservative for mature market; 2020 was ~8x, 2016 ~30x)
+  //   - If p.b3 >= peakPrice: no correction, straight exponential halving→p.b3
+  const halvingPrice=PRE_HV_PRICES[18]; // $257,871 at M19
+  const PEAK_MULT=2.0, PEAK_OFFSET=14;  // peak at M33 (M19 + 14)
+  const peakPrice=halvingPrice*PEAK_MULT;
+  // Segment A: halvingPrice → peakPrice over 14 months (M20..M33)
+  const rateA=Math.pow(peakPrice/halvingPrice,1/PEAK_OFFSET)-1;
+  // Segment B: peakPrice → p.b3 over 3 months (M34..M36) if p.b3 < peakPrice
+  //            else: halvingPrice → p.b3 over 17 months straight
+  const straight=p.b3>=peakPrice;
+  const rateB=straight
+    ? Math.pow(p.b3/halvingPrice,1/17)-1
+    : Math.pow(p.b3/peakPrice,1/3)-1;
 
   function btcPriceAt(m){
     if(m<=19) return PRE_HV_PRICES[m-1];
-    const idx=m-20; // 0-based index into POST_HV_PRICES
-    return idx<POST_HV_PRICES.length?POST_HV_PRICES[idx]:p.b3;
+    const mPost=m-19; // 1=M20, 14=M33, 17=M36
+    if(straight) return Math.round(halvingPrice*Math.pow(1+rateB,mPost));
+    if(mPost<=PEAK_OFFSET) return Math.round(halvingPrice*Math.pow(1+rateA,mPost));
+    return Math.round(peakPrice*Math.pow(1+rateB,mPost-PEAK_OFFSET));
   }
 
   // ── POST-HALVING HASHRATE PATTERN ────────────────────────────────────────────
