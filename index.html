@@ -178,7 +178,7 @@ tbody tr.tot td{color:var(--gold);font-weight:600;background:var(--gold-bg)}
   .kl,.ks{font-size:8pt!important}
   .g2{display:grid!important;grid-template-columns:1fr 1fr!important;gap:8pt!important}
   .card{padding:8pt!important;box-shadow:none!important;break-inside:avoid}
-  canvas{display:none!important}
+  /* canvas display managed by export function */
   .pci{display:block!important;width:100%!important;height:auto!important}
   .cw{height:auto!important}
   table{font-size:8pt!important}
@@ -188,6 +188,8 @@ tbody tr.tot td{color:var(--gold);font-weight:600;background:var(--gold-bg)}
   .st td,.st th{font-size:7pt!important;padding:3pt 4pt!important}
 }
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
 <body>
 
@@ -245,7 +247,7 @@ tbody tr.tot td{color:var(--gold);font-weight:600;background:var(--gold-bg)}
           <div class="mw-item"><label>A&#241;o 2</label><input class="mw-inp" type="number" id="mwy2" value="3" min="0" max="500" step="1" oninput="update()"></div>
           <div class="mw-item"><label>A&#241;o 3</label><input class="mw-inp" type="number" id="mwy3" value="3" min="0" max="500" step="1" oninput="update()"></div>
         </div>
-        <div class="mw-hint">Cada a&#241;o tiene su propia capacidad flat. Ingres&#225; el valor para cada per&#237;odo.</div>
+        <div class="mw-hint">Capacidad total operativa por a&#241;o. CAPEX de mineros = pico m&#225;ximo entre los 3 a&#241;os. Expansiones se compran por diferencia.</div>
       </div>
       <div class="sb-sec">
         <div class="sb-lbl">Mercado BTC</div>
@@ -289,7 +291,34 @@ tbody tr.tot td{color:var(--gold);font-weight:600;background:var(--gold-bg)}
       </div>
       <div class="sb-sec">
         <div class="sb-lbl">Operaci&#243;n</div>
-        <div class="ctrl"><div class="ctrl-hdr"><span class="ctrl-lbl">Tarifa el&#233;ctrica (USD/MWh)</span><span class="ctrl-val" id="vtar" style="color:var(--energy)">$45</span></div><input type="range" id="sltar" min="20" max="100" step="0.5" value="45" oninput="update()"><div class="ctrl-range"><span>$20</span><span>$100</span></div></div>
+        <!-- Energy mode selector (miner only) -->
+        <div class="ctrl" id="ctrl-emode">
+          <div class="ctrl-hdr" style="margin-bottom:6px"><span class="ctrl-lbl" style="font-weight:600">Fuente de energ&#237;a</span></div>
+          <div style="display:flex;gap:4px">
+            <button id="em-grid" class="cm-btn cm-active" onclick="setEnergyMode('grid')">Red el&#233;ctrica</button>
+            <button id="em-gas"  class="cm-btn"           onclick="setEnergyMode('gas')">Gas natural</button>
+          </div>
+        </div>
+        <!-- Grid mode -->
+        <div class="ctrl" id="ctrl-grid">
+          <div class="ctrl-hdr"><span class="ctrl-lbl">Tarifa el&#233;ctrica (USD/MWh)</span><span class="ctrl-val" id="vtar" style="color:var(--energy)">$45</span></div>
+          <input type="range" id="sltar" min="20" max="100" step="0.5" value="45" oninput="update()">
+          <div class="ctrl-range"><span>$20</span><span>$100</span></div>
+        </div>
+        <!-- Gas mode -->
+        <div id="ctrl-gas" style="display:none">
+          <div class="ctrl">
+            <div class="ctrl-hdr"><span class="ctrl-lbl">Precio gas (USD/MMBTU)</span><span class="ctrl-val" id="vgasprice" style="color:var(--energy)">$3.0</span></div>
+            <input type="range" id="slgasprice" min="0.5" max="15" step="0.1" value="3.0" oninput="update()">
+            <div class="ctrl-range"><span>$0.5</span><span>$15</span></div>
+          </div>
+          <div class="ctrl">
+            <div class="ctrl-hdr"><span class="ctrl-lbl">Fee motogenerador (USD/MWh)</span><span class="ctrl-val" id="vgasfee" style="color:var(--energy)">$15</span></div>
+            <input type="range" id="slgasfee" min="5" max="50" step="0.5" value="15" oninput="update()">
+            <div class="ctrl-range"><span>$5</span><span>$50</span></div>
+          </div>
+          <div class="mw-hint" id="gas-info">Eficiencia: 9,300 BTU/kWh = 9.3 MMBTU/MWh = 0.263 Mm³/MWh</div>
+        </div>
         <div class="ctrl"><div class="ctrl-hdr"><span class="ctrl-lbl">O&amp;M mensual (USD)</span><span class="ctrl-val" id="vom" style="color:var(--text2)">$10,000</span></div><input type="range" id="slom" min="2000" max="80000" step="500" value="10000" oninput="update()"><div class="ctrl-range"><span>$2k</span><span>$80k</span></div></div>
         <!-- Contract mode selector -->
         <div class="ctrl">
@@ -344,7 +373,7 @@ const HW={
 };
 const cxM={miners:{l:'Mineros (precio/u)',v:2800},shelter:{l:'Shelter / contenedor (USD)',v:80000},elec:{l:'Instalaci&#243;n el&#233;ctrica (USD)',v:40000},pp:{l:'Puesta a punto locaci&#243;n (USD)',v:20000},otros:{l:'Otros CAPEX (USD)',v:0}};
 const cxE={pp:{l:'Puesta a punto locaci&#243;n (USD)',v:150000},civil:{l:'Obras civiles (USD)',v:50000},elec:{l:'Infraestructura el&#233;ctrica (USD)',v:80000},otros:{l:'Otros CAPEX (USD)',v:0}};
-let RL=null,hw=HW.s21p,CH={},CM='ps'; // CM = contract mode: 'ps'|'rs'|'both'
+let RL=null,hw=HW.s21p,CH={},CM='ps',EM='grid'; // CM=contract mode, EM=energy mode: 'grid'|'gas'
 const fm=(n,d=0)=>new Intl.NumberFormat('en-US',{maximumFractionDigits:d,minimumFractionDigits:d}).format(n);
 const us=(n,d=0)=>(n<0?'-$':'$')+fm(Math.abs(n),d);
 const uk=n=>{const a=Math.abs(n);if(a>=1e6)return(n<0?'-$':'$')+(a/1e6).toFixed(2)+'M';if(a>=1e3)return(n<0?'-$':'$')+(a/1e3).toFixed(0)+'k';return us(n);};
@@ -353,7 +382,12 @@ const ci=(a,v)=>a.reduce((b,x,i)=>Math.abs(x-v)<Math.abs(a[b]-v)?i:b,0);
 const g=id=>document.getElementById(id);
 const sv=(id,v)=>{const e=g(id);if(e)e.textContent=v;};
 function getMW(){return[+g('mwy1').value||0,+g('mwy2').value||0,+g('mwy3').value||0];}
-function mwAt(a,m){return m<=12?a[0]:m<=24?a[1]:a[2];}
+function mwAt(a,m){
+  // MW inputs are TOTAL capacity for that year (flat per period)
+  if(m<=12) return a[0];
+  if(m<=24) return a[1];
+  return a[2];
+}
 function getP(){
   const v=id=>+g(id).value;
   // Next halving: ~April 2028 = block 1,050,000
@@ -370,6 +404,9 @@ function getP(){
   return{
     b3:v('slbtc3'),nhg:v('slnhg'),
     mw:getMW(),tar:v('sltar'),om:v('slom'),shr:v('slshr'),cg:v('slcg')||30,
+    em:EM,  // energy mode: 'grid'|'gas'
+    gasPrice:+(g('slgasprice')?g('slgasprice').value:3.0), // USD/MMBTU
+    gasFee:+(g('slgasfee')?g('slgasfee').value:15),        // USD/MWh motogen fee
     rsh:+(g('slrsh')?g('slrsh').value:5),  // revenue share %
     cm:CM,                                   // contract mode
     cx:cxTot(),
@@ -396,13 +433,30 @@ function nhAdjAt(p,m){
 function cxTot(){
   const s=RL==='miner'?cxM:cxE;
   if(RL==='miner'){
-    const mw0=+g('mwy1').value||0;
-    const mwA=mw0*(1-OV);
-    const nMiners=Math.floor(mwA/(hw.w/1e6));
+    // Total miners = peak capacity across all years (inputs = total MW per year)
+    const mw1=+g('mwy1').value||0;
+    const mw2=+g('mwy2').value||0;
+    const mw3=+g('mwy3').value||0;
+    const peakMW=Math.max(mw1,mw2,mw3)*(1-OV);
+    const nMiners=Math.floor(peakMW/(hw.w/1e6));
     const minersCost=nMiners*(cxM.miners.v||0);
     return minersCost+Object.entries(s).filter(([k])=>k!=='miners').reduce((t,[,o])=>t+(o.v||0),0);
   }
   return Object.values(s).reduce((t,o)=>t+(o.v||0),0);
+}
+function setEnergyMode(m){
+  EM=m;
+  ['grid','gas'].forEach(k=>g('em-'+k).classList.toggle('cm-active',k===m));
+  g('ctrl-grid').style.display=m==='grid'?'block':'none';
+  g('ctrl-gas').style.display=m==='gas'?'block':'none';
+  // Update gas-info hint with current consumption estimate
+  const mw1=+g('mwy1').value||0,mw2=+g('mwy2').value||0,mw3=+g('mwy3').value||0;
+  const maxMW=mw1+mw2+mw3||1;
+  const mmbtuMo=Math.round(maxMW*9.3*24*30);
+  const mm3Mo=(maxMW*0.263*24*30).toFixed(0);
+  const gi=g('gas-info');
+  if(gi) gi.textContent=`9,300 BTU/kWh · ${maxMW}MW → ~${mmbtuMo.toLocaleString('es-AR')} MMBTU/mes = ${mm3Mo} Mm³/mes`;
+  update();
 }
 function setContractMode(m){
   CM=m;
@@ -421,6 +475,9 @@ function enterApp(r){
   RL=r;g('role-screen').style.display='none';g('app-screen').style.display='block';
   const p=g('rpill');p.textContent=r==='miner'?'⛏ Minero':'⚡ Vendedor de Energía';p.className='rpill '+r;
   g('ctrcg').style.display=r==='energy'?'block':'none';
+  g('ctrl-emode').style.display=r==='miner'?'block':'none';
+  g('ctrl-grid').style.display=r==='miner'&&EM==='grid'?'block':r==='energy'?'block':'none';
+  g('ctrl-gas').style.display=r==='miner'&&EM==='gas'?'block':'none';
   sv('shrlbl',r==='miner'?'Profit share pagado (%)':'Profit share cobrado (%)');
   sv('rshlbl',r==='miner'?'Revenue share pagado (%)':'Revenue share cobrado (%)');
   buildCx();buildMain();onHW();
@@ -429,13 +486,18 @@ function switchRole(){RL=null;Object.values(CH).forEach(c=>c.destroy());CH={};g(
 function buildCx(){
   const s=RL==='miner'?cxM:cxE;
   if(RL==='miner'){
-    const mw0=+g('mwy1').value||0;
-    const mwA=mw0*(1-OV);
-    const nMiners=Math.floor(mwA/(hw.w/1e6));
+    const mw1b=+g('mwy1').value||0,mw2b=+g('mwy2').value||0,mw3b=+g('mwy3').value||0;
+    const peakMWb=Math.max(mw1b,mw2b,mw3b)*(1-OV);
+    const nMiners=Math.floor(peakMWb/(hw.w/1e6));
+    // Incremental miners per year (based on total capacity deltas)
+    const n1=Math.floor(mw1b*(1-OV)/(hw.w/1e6));
+    const inc2=Math.max(0,mw2b-mw1b), inc3=Math.max(0,mw3b-mw2b);
+    const n2=Math.floor(inc2*(1-OV)/(hw.w/1e6));
+    const n3=Math.floor(inc3*(1-OV)/(hw.w/1e6));
     const minerTotal=nMiners*(cxM.miners.v||0);
     g('cxdet').innerHTML=`
       <div class="cx-row">
-        <label>Mineros (precio/u)<br><span style="font-size:9px;color:var(--text3)">${fm(nMiners,0)} unidades × precio = ${uk(minerTotal)}</span></label>
+        <label>Mineros (precio/u)<br><span style="font-size:9px;color:var(--text3)">${fm(nMiners,0)} total: +${n1} A1 / +${n2} A2 / +${n3} A3 = ${uk(minerTotal)}</span></label>
         <input class="cx-inp" type="number" id="cxminers" value="${cxM.miners.v}" onchange="onCx('miners',this.value)" min="0" step="100">
       </div>`+
       Object.entries(s).filter(([k])=>k!=='miners').map(([k,o])=>
@@ -499,7 +561,12 @@ function calc(p){
     const reward=rewardAt(p,m);        // dynamic block reward
     const btcm=(th/1e6)/nh*reward*BPD*30*(1-PF);
     const btcp=btcPriceAt(m),rev=btcm*btcp;
-    const el=mw*p.tar*24*30,eb=rev-el-p.om;
+    const mwh=mw*24*30; // MWh consumed this month
+    // Energy cost depends on mode
+    const el=p.em==='gas'
+      ? mwh*(p.gasPrice*9.3 + p.gasFee)   // gas: $/MMBTU*9.3MMBTU/MWh + fee/MWh
+      : mwh*p.tar;                          // grid: flat tariff
+    const eb=rev-el-p.om;
     // Share calculations per contract mode
     const ps_amt = (p.cm==='ps'||p.cm==='both') ? Math.max(0,eb)*(p.shr/100) : 0;
     const rs_amt = (p.cm==='rs'||p.cm==='both') ? rev*(p.rsh/100) : 0;
@@ -618,7 +685,8 @@ function updCF(res,p){
   const shareColLabelE={ps:'Profit Share',rs:'Revenue Share',both:'PS + RS'}[p.cm]||'Profit Share';
   if(im){
     const ys=yrs.map((yr,yi)=>({mw:p.mw[yi],rev:yr.reduce((s,r)=>s+r.rev,0),el:yr.reduce((s,r)=>s+r.el,0),om:yr.length*p.om,eb:yr.reduce((s,r)=>s+r.eb,0),ps:yr.reduce((s,r)=>s+r.ps,0),en:yr.reduce((s,r)=>s+r.eM,0)}));
-    t.innerHTML=`<thead><tr><th></th><th>MW</th><th>Revenue</th><th>(-) Elec.</th><th>(-) O&amp;M</th><th>EBITDA Bruto</th><th>${shareColLabel}</th><th>EBITDA Neto</th></tr></thead><tbody>
+    const energyLabel=p.em==="gas"?"(-) Gas+Fee":"(-) Elec.";
+    t.innerHTML=`<thead><tr><th></th><th>MW</th><th>Revenue</th><th>${energyLabel}</th><th>(-) O&amp;M</th><th>EBITDA Bruto</th><th>${shareColLabel}</th><th>EBITDA Neto</th></tr></thead><tbody>
     ${ys.map((y,i)=>`<tr class="${i===2?'sub':''}"><td>A&#241;o ${i+1}</td><td style="color:var(--energy);font-family:'DM Mono',monospace">${y.mw} MW</td><td class="pos">${uk(y.rev)}</td><td class="neg">(${uk(y.el).replace('$','')})</td><td class="neg">(${uk(y.om).replace('$','')})</td><td class="${y.eb>=0?'pos':'neg'}">${uk(y.eb)}</td><td class="pur">(${uk(y.ps).replace('$','')})</td><td class="${y.en>=0?'pos':'neg'}">${uk(y.en)}</td></tr>`).join('')}
     <tr class="tot"><td>TOTAL 36M</td><td>&#8212;</td><td class="pos">${uk(res.tR)}</td><td class="neg">(${uk(res.rows.reduce((s,r)=>s+r.el,0)).replace('$','')})</td><td class="neg">(${uk(p.om*36).replace('$','')})</td><td>${uk(res.rows.reduce((s,r)=>s+r.eb,0))}</td><td class="pur">(${uk(res.tPS).replace('$','')})</td><td class="${res.tEM>=0?'pos':'neg'}">${uk(res.tEM)}</td></tr>
     <tr style="background:var(--gold-bg)"><td style="color:var(--gold)">VAN Neto (&#8722;CAPEX)</td><td colspan="7" style="color:var(--gold);text-align:right;font-weight:600">${us(res.vmn)}</td></tr></tbody>`;
@@ -681,7 +749,7 @@ function bS2(p){
       const bmg=Math.pow(p.b3/btc0,1/36)-1;let s=0;
       for(let m=1;m<=36;m++){
         const mwm=mwAt(p.mw,m);if(!mwm){s+=p.tar;continue;}
-        const mn=Math.floor(mwm*(1-OV)/(hw.w/1e6)),nh=nh0*Math.pow(1+nhmg,m),rev=(mn*hw.th/1e6)/nh*BR*BPD*30*(1-PF)*btc0*Math.pow(1+bmg,m),el=mwm*p.tar*24*30,eb=rev-el-p.om;
+        const mn=Math.floor(mwm*(1-OV)/(hw.w/1e6)),nh=nh0*Math.pow(1+nhmg,m),rev=(mn*hw.th/1e6)/nh*BR*BPD*30*(1-PF)*btc0*Math.pow(1+bmg,m),mwhS=mwm*24*30,el=p.em==='gas'?mwhS*(p.gasPrice*9.3+p.gasFee):mwhS*p.tar,eb=rev-el-p.om;
         const ps_amt=(p.cm==='ps'||p.cm==='both')?Math.max(0,eb)*(p.shr/100):0;
         const rs_amt=(p.cm==='rs'||p.cm==='both')?rev*(p.rsh/100):0;
         s+=(el+ps_amt+rs_amt)/(mwm*24*30);
@@ -697,7 +765,20 @@ function bS2(p){
   }
 }
 function updLbl(p,res){
-  sv('vbtc3',us(p.b3));sv('vnhg',p.nhg+'%');sv('vtar','$'+p.tar.toFixed(1));sv('vom','$'+fm(p.om));sv('vshr',p.shr+'%');sv('vrsh',p.rsh+'%');sv('vcg','$'+p.cg.toFixed(1));sv('cxtot',uk(p.cx));
+  sv('vbtc3',us(p.b3));sv('vnhg',p.nhg+'%');sv('vom','$'+fm(p.om));sv('vshr',p.shr+'%');sv('vrsh',p.rsh+'%');sv('vcg','$'+p.cg.toFixed(1));sv('cxtot',uk(p.cx));
+  if(p.em==='gas'){
+    const effMWh=p.gasPrice*9.3+p.gasFee;
+    sv('vgasprice','$'+p.gasPrice.toFixed(1));
+    sv('vgasfee','$'+p.gasFee.toFixed(1));
+    // Update gas hint with full MW consumption
+    const maxMW=(p.mw[0]+p.mw[1]+p.mw[2])||1;
+    const mmbtuMo=Math.round(maxMW*9.3*24*30);
+    const mm3Mo=(maxMW*9.3*28.317*24*30/1000).toFixed(0);
+    const gi=g('gas-info');
+    if(gi) gi.textContent=`9,300 BTU/kWh · ${maxMW}MW → ${mmbtuMo.toLocaleString('es-AR')} MMBTU/mes = ${mm3Mo} Mm³/mes · equiv $${effMWh.toFixed(1)}/MWh`;
+  } else {
+    sv('vtar','$'+p.tar.toFixed(1));
+  }
   sv('vhvdrop',p.hvDrop*100+'%');
   // hvPeak/hvPeakM sliders removed
   // Halving boost info text
@@ -722,47 +803,140 @@ function updLbl(p,res){
 function onHW(){hw=HW[g('hws').value];if(RL==='miner'&&g('cxminers')){g('cxminers').value=hw.p;cxM.miners.v=hw.p;}update();}
 function update(){if(!RL)return;const p=getP(),res=calc(p);if(RL==='miner')buildCx();updLbl(p,res);updKPI(res,p);updCh(res,p);updCF(res,p);bS1(p);bS2(p);}
 async function fetchLive(){try{const r=await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd',{signal:AbortSignal.timeout(8000)});if(!r.ok)throw new Error();const d=await r.json(),price=Math.round(d.bitcoin.usd/1000)*1000;const ld=g('ldsp');if(ld){ld.style.display='inline';ld.textContent=`LIVE $${price.toLocaleString('en-US')}`;}update();}catch(e){console.warn('Live data unavailable');}}
-let _imgs=[];
-function _inj(){
-  _imgs=[];
+// ── PDF Export ──────────────────────────────────────────────────────────────
+// Strategy: capture charts to <img> tags ONCE, suppress beforeprint from firing
+// a second injection, then clean up after the dialog closes.
+let _imgs=[], _printing=false;
+
+function _captureCharts(){
+  // Remove any stale images first
+  _imgs.forEach(i=>i.remove()); _imgs=[];
   Object.values(CH).forEach(ch=>{
     try{
       const c=ch.canvas;
+      // Render chart with white background onto offscreen canvas
       const o=document.createElement('canvas');
-      o.width=c.width; o.height=c.height;
+      o.width=c.offsetWidth*window.devicePixelRatio||c.width;
+      o.height=c.offsetHeight*window.devicePixelRatio||c.height;
       const x=o.getContext('2d');
       x.fillStyle='#ffffff';
       x.fillRect(0,0,o.width,o.height);
-      x.drawImage(c,0,0);
-      const i=document.createElement('img');
-      i.src=o.toDataURL('image/png',1);
-      i.className='pci';
-      i.style.cssText='width:100%;height:auto;display:block;';
-      c.parentNode.insertBefore(i,c);
-      _imgs.push(i);
+      x.drawImage(c,0,0,o.width,o.height);
+      const img=document.createElement('img');
+      img.src=o.toDataURL('image/png',1);
+      img.className='pci';
+      img.style.cssText='width:100%;height:auto;display:block;max-height:none;';
+      c.parentNode.insertBefore(img,c);
+      _imgs.push(img);
     }catch(e){console.warn('chart capture failed',e);}
   });
 }
-function _rem(){ _imgs.forEach(i=>i.remove()); _imgs=[]; }
-window.addEventListener('beforeprint', _inj);
-window.addEventListener('afterprint',  _rem);
+
+function _cleanup(){
+  _imgs.forEach(i=>i.remove());
+  _imgs=[];
+  _printing=false;
+}
+
+// beforeprint/afterprint removed — using html2canvas+jsPDF instead
 
 function printDashboard(){
   if(!RL)return;
   const p=getP(),res=calc(p),im=RL==='miner',mw=p.mw;
-  let cov=g('pcov');
-  if(!cov){cov=document.createElement('div');cov.id='pcov';cov.style.display='none';g('mc').prepend(cov);}
-  const modeLabel={ps:'Profit Share',rs:'Revenue Share',both:'PS+RS'}[p.cm]||'PS';
-  cov.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8pt;"><div><div style="font-size:15pt;font-weight:700;color:#1a1d23;font-family:sans-serif;">BTC Mining Simulator &middot; ${im?'Minero':'Vendedor de Energía'}</div><div style="font-size:8pt;color:#5a6072;margin-top:2pt;font-family:monospace;">${hw.n} &middot; Contrato: ${modeLabel} &middot; ${new Date().toLocaleString('es-AR')}</div></div><div style="text-align:right;font-family:monospace;font-size:8pt;color:#5a6072;"><div style="font-size:11pt;font-weight:700;color:#b5810a;">VAN Neto: ${us(im?res.vmn:res.ven)}</div><div>EBITDA 36M: ${uk(im?res.tEM:res.tEE)}</div><div>CAPEX: ${uk(p.cx)} &middot; Payback: ${im?(res.pbm?'M'+res.pbm:'>36M'):(res.pbe?'M'+res.pbe:'>36M')}</div></div></div><div style="display:grid;grid-template-columns:repeat(11,1fr);gap:5pt;padding:6pt;background:#f0f2f6;border-radius:4pt;font-family:monospace;font-size:7pt;"><div><div style="color:#9aa0b0">BTC M1</div><strong>$55k</strong></div><div><div style="color:#9aa0b0">BTC 3Y</div><strong>${us(p.b3)}</strong></div><div><div style="color:#9aa0b0">Crec./mes</div><strong>histórico</strong></div><div><div style="color:#9aa0b0">Tarifa</div><strong>$${p.tar}/MWh</strong></div><div><div style="color:#9aa0b0">MW A1</div><strong>${mw[0]} MW</strong></div><div><div style="color:#9aa0b0">MW A2</div><strong>${mw[1]} MW</strong></div><div><div style="color:#9aa0b0">MW A3</div><strong>${mw[2]} MW</strong></div><div><div style="color:#9aa0b0">Contrato</div><strong>${modeLabel}</strong></div><div><div style="color:#9aa0b0">P.Share</div><strong>${p.shr}%</strong></div><div><div style="color:#9aa0b0">Rev.Share</div><strong>${p.rsh}%</strong></div></div>`;
 
-  // Inject chart images synchronously BEFORE opening print dialog
-  _inj();
-  // Small delay to ensure images are painted before Chrome snapshots the page
-  setTimeout(()=>{
-    window.print();
-    // Cleanup after dialog closes (afterprint fires, but also set a fallback)
-    setTimeout(_rem, 2000);
-  }, 150);
+  // Build cover block
+  let cov=g('pcov');
+  if(!cov){cov=document.createElement('div');cov.id='pcov';g('mc').prepend(cov);}
+  const modeLabel={ps:'Profit Share',rs:'Revenue Share',both:'PS+RS'}[p.cm]||'PS';
+  cov.style.cssText='display:block;padding:10px 12px;background:#f8f9fc;border-radius:6px;margin-bottom:12px;border:1px solid #e2e5ed;';
+  cov.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;"><div><div style="font-size:14px;font-weight:700;color:#1a1d23;font-family:sans-serif;">BTC Mining Simulator · ${im?'Minero':'Vendedor de Energía'}</div><div style="font-size:10px;color:#5a6072;margin-top:2px;font-family:monospace;">${hw.n} · Contrato: ${modeLabel} · ${new Date().toLocaleString('es-AR')}</div></div><div style="text-align:right;font-family:monospace;font-size:10px;color:#5a6072;"><div style="font-size:13px;font-weight:700;color:#b5810a;">VAN Neto: ${us(im?res.vmn:res.ven)}</div><div>EBITDA 36M: ${uk(im?res.tEM:res.tEE)} · CAPEX: ${uk(p.cx)} · Payback: ${im?(res.pbm?'M'+res.pbm:'>36M'):(res.pbe?'M'+res.pbe:'>36M')}</div></div></div><div style="display:flex;flex-wrap:wrap;gap:12px;font-family:monospace;font-size:10px;"><span><span style="color:#9aa0b0">BTC M1</span> <strong>$55k</strong></span><span><span style="color:#9aa0b0">BTC 3Y</span> <strong>${us(p.b3)}</strong></span><span><span style="color:#9aa0b0">Energía</span> <strong>${p.em==="gas"?`$${p.gasPrice}/MMB+$${p.gasFee}fee`:`$${p.tar}/MWh`}</strong></span><span><span style="color:#9aa0b0">MW A1/A2/A3</span> <strong>${mw[0]}/${mw[1]}/${mw[2]} MW</strong></span><span><span style="color:#9aa0b0">Contrato</span> <strong>${modeLabel}</strong></span><span><span style="color:#9aa0b0">P.Share</span> <strong>${p.shr}%</strong></span><span><span style="color:#9aa0b0">Rev.Share</span> <strong>${p.rsh}%</strong></span></div>`;
+
+  // Show loading state
+  const btn=document.querySelector('[onclick="printDashboard()"]');
+  const origHTML=btn?btn.innerHTML:'';
+  if(btn){btn.textContent='Generando PDF...';btn.disabled=true;}
+
+  const {jsPDF}=window.jspdf;
+
+  // Step 1: capture each Chart.js canvas to a static image
+  // This prevents any canvas re-render during html2canvas processing
+  const snapshots={};
+  Object.entries(CH).forEach(([id,ch])=>{
+    try{
+      const c=ch.canvas;
+      const off=document.createElement('canvas');
+      off.width=c.width; off.height=c.height;
+      const ctx=off.getContext('2d');
+      ctx.fillStyle='#ffffff';
+      ctx.fillRect(0,0,off.width,off.height);
+      ctx.drawImage(c,0,0);
+      // Replace canvas with static img temporarily
+      const img=document.createElement('img');
+      img.src=off.toDataURL('image/png',1);
+      img.style.cssText=`width:${c.offsetWidth}px;height:${c.offsetHeight}px;display:block;`;
+      img.dataset.snapId=id;
+      c.style.display='none';
+      c.parentNode.insertBefore(img,c.nextSibling);
+      snapshots[id]={canvas:c,img};
+    }catch(e){console.warn('snapshot failed',id,e);}
+  });
+
+  // Step 2: capture #mc with html2canvas
+  const mc=g('mc');
+  html2canvas(mc,{
+    scale:1.5,
+    useCORS:true,
+    backgroundColor:'#f0f2f6',
+    logging:false,
+    windowWidth:mc.scrollWidth,
+    width:mc.scrollWidth,
+    height:mc.scrollHeight,
+  }).then(canvas=>{
+    // Step 3: restore canvases
+    Object.values(snapshots).forEach(({canvas:c,img})=>{
+      c.style.display='';
+      img.remove();
+    });
+    cov.style.display='none';
+    if(btn){btn.innerHTML=origHTML;btn.disabled=false;}
+
+    // Step 4: slice canvas into A4 landscape pages
+    const pdf=new jsPDF({orientation:'landscape',unit:'mm',format:'a4'});
+    const PW=297,PH=210,margin=8;
+    const usableW=PW-margin*2;
+    const usableH=PH-margin*2;
+
+    // Scale: how many px per mm on the captured canvas
+    const pxPerMm=canvas.width/usableW;
+    const pageHeightPx=usableH*pxPerMm;
+    const totalPages=Math.ceil(canvas.height/pageHeightPx);
+
+    for(let pg=0;pg<totalPages;pg++){
+      if(pg>0)pdf.addPage();
+      const srcY=pg*pageHeightPx;
+      const srcH=Math.min(pageHeightPx,canvas.height-srcY);
+      const slice=document.createElement('canvas');
+      slice.width=canvas.width;
+      slice.height=srcH;
+      const sx=slice.getContext('2d');
+      sx.fillStyle='#f0f2f6';
+      sx.fillRect(0,0,slice.width,slice.height);
+      sx.drawImage(canvas,0,srcY,canvas.width,srcH,0,0,canvas.width,srcH);
+      const sliceData=slice.toDataURL('image/jpeg',0.90);
+      const sliceH=(srcH/pxPerMm);
+      pdf.addImage(sliceData,'JPEG',margin,margin,usableW,sliceH);
+      pdf.setFontSize(7);pdf.setTextColor(150);
+      pdf.text(`BTC Mining Simulator · Pág ${pg+1}/${totalPages}`,margin,PH-3);
+    }
+
+    pdf.save(`btc_mining_${im?'minero':'energia'}_${new Date().toISOString().slice(0,10)}.pdf`);
+  }).catch(err=>{
+    Object.values(snapshots).forEach(({canvas:c,img})=>{c.style.display='';img.remove();});
+    cov.style.display='none';
+    if(btn){btn.innerHTML=origHTML;btn.disabled=false;}
+    console.error('PDF export failed:',err);
+    alert('Error al exportar PDF. Intentá de nuevo.');
+  });
 }
 
 </script>
